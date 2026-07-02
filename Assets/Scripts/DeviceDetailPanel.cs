@@ -44,6 +44,9 @@ public class DeviceDetailPanel : MonoBehaviour
     private string _selectedId;
     private float _timer;
 
+    /// <summary>The device ID currently shown in this panel — read by AlertButton.</summary>
+    public string SelectedId => _selectedId;
+
     private void Start()
     {
         foreach (var binding in deviceButtons)

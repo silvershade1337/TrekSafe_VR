@@ -102,12 +102,12 @@ public class SerialLogPanel : MonoBehaviour
         RegexOptions.Compiled);
 
     // ── internals ──────────────────────────────────────────────────────────
-    private SerialPort              _port;
-    private Thread                  _readThread;
+    private SerialPort _port;
+    private Thread _readThread;
     private CancellationTokenSource _cts;
 
-    private readonly ConcurrentQueue<string> _lineQueue  = new ConcurrentQueue<string>();
-    private readonly Queue<string>           _lineBuffer = new Queue<string>();
+    private readonly ConcurrentQueue<string> _lineQueue = new ConcurrentQueue<string>();
+    private readonly Queue<string> _lineBuffer = new Queue<string>();
 
     // One open StreamWriter per device ID, so each device gets its own CSV file.
     private readonly Dictionary<string, StreamWriter> _csvWriters = new Dictionary<string, StreamWriter>();
@@ -180,14 +180,14 @@ public class SerialLogPanel : MonoBehaviour
 
         var data = new DeviceData
         {
-            Id        = id,
-            Lat       = ParseFloat(m.Groups["lat"].Value),
-            Lon       = ParseFloat(m.Groups["lon"].Value),
-            Temp      = ParseFloat(m.Groups["temp"].Value),
-            Press     = ParseFloat(m.Groups["press"].Value),
-            Alt       = ParseFloat(m.Groups["alt"].Value),
-            Sos       = m.Groups["sos"].Value == "1",
-            Fall      = m.Groups["fall"].Value == "1",
+            Id = id,
+            Lat = ParseFloat(m.Groups["lat"].Value),
+            Lon = ParseFloat(m.Groups["lon"].Value),
+            Temp = ParseFloat(m.Groups["temp"].Value),
+            Press = ParseFloat(m.Groups["press"].Value),
+            Alt = ParseFloat(m.Groups["alt"].Value),
+            Sos = m.Groups["sos"].Value == "1",
+            Fall = m.Groups["fall"].Value == "1",
             Timestamp = DateTime.Now
         };
 
@@ -221,6 +221,32 @@ public class SerialLogPanel : MonoBehaviour
     public List<DeviceData> GetHistory(string id)
     {
         return _devices.TryGetValue(id, out DeviceRecord record) ? record.History : null;
+    }
+
+    // ── Serial write ────────────────────────────────────────────────────────
+    /// <summary>
+    /// Sends a line back over the same serial port (e.g. "ID=T1,ALERT=1").
+    /// Safe to call from the main thread. Logs an error to the panel if the
+    /// port is closed or the write fails.
+    /// </summary>
+    public void SendLine(string message)
+    {
+        Debug.Log("SendLine called with " + message);
+        if (_port == null || !_port.IsOpen)
+        {
+            Enqueue("[Serial] Cannot send — port is not open.");
+            return;
+        }
+
+        try
+        {
+            _port.WriteLine(message);
+            Enqueue($"[Sent] {message}");
+        }
+        catch (Exception ex)
+        {
+            Enqueue($"[Serial send error] {ex.Message}");
+        }
     }
 
     // ── CSV logging ─────────────────────────────────────────────────────────
@@ -276,15 +302,15 @@ public class SerialLogPanel : MonoBehaviour
             _port = new SerialPort(portName, baudRate)
             {
                 ReadTimeout = readTimeoutMs,
-                NewLine     = "\n"   // change to "\r\n" if ESP sends CR+LF
+                NewLine = "\n"   // change to "\r\n" if ESP sends CR+LF
             };
             _port.Open();
 
-            _cts        = new CancellationTokenSource();
+            _cts = new CancellationTokenSource();
             _readThread = new Thread(() => ReadLoop(_cts.Token))
             {
                 IsBackground = true,
-                Name         = "SerialReadThread"
+                Name = "SerialReadThread"
             };
             _readThread.Start();
 
