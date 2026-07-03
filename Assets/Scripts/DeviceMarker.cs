@@ -29,8 +29,12 @@ public class DeviceMarker : MonoBehaviour
     [Tooltip("If assigned, this Transform is what billboards to face the camera (defaults to labelText's Canvas).")]
     public Transform billboardTarget;
 
+    [Tooltip("Optional GameObject on the 3D pointer canvas that blinks when SOS is active")]
+    public GameObject sosWarningElement;
+
     private CesiumGlobeAnchor _anchor;
     private Camera _mainCamera;
+    private bool _isSosActive;
 
     public string DeviceId { get; private set; }
 
@@ -43,11 +47,31 @@ public class DeviceMarker : MonoBehaviour
 
         if (billboardTarget == null && labelText != null)
             billboardTarget = labelText.transform.root == transform ? labelText.transform : labelText.transform.parent;
+
+        if (sosWarningElement != null)
+            sosWarningElement.SetActive(false);
     }
 
     private void Start()
     {
         _mainCamera = Camera.main;
+    }
+
+    private void Update()
+    {
+        if (sosWarningElement != null)
+        {
+            if (_isSosActive)
+            {
+                // Blink state: cycles active/inactive (3 blinks per second)
+                bool blinkState = (Mathf.FloorToInt(Time.time * 3f) % 2) == 0;
+                sosWarningElement.SetActive(blinkState);
+            }
+            else
+            {
+                sosWarningElement.SetActive(false);
+            }
+        }
     }
 
     private void LateUpdate()
@@ -70,6 +94,7 @@ public class DeviceMarker : MonoBehaviour
     public void UpdateLabel(DeviceData d)
     {
         DeviceId = d.Id;
+        _isSosActive = d.Sos;
 
         if (labelText == null) return;
 

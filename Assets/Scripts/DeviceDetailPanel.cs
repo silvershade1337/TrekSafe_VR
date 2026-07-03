@@ -27,6 +27,8 @@ public class DeviceDetailPanel : MonoBehaviour
         public Button button;
         [Tooltip("Device ID this button represents, e.g. T1 — must match the ID= field from the ESP")]
         public string deviceId;
+        [Tooltip("Optional GameObject inside the button that blinks when SOS is active")]
+        public GameObject sosWarningElement;
     }
 
     [Header("References")]
@@ -49,9 +51,29 @@ public class DeviceDetailPanel : MonoBehaviour
 
     private void Start()
     {
+        if (serialLogPanel == null)
+        {
+            Debug.LogError("[DeviceDetailPanel] SerialLogPanel reference is missing in the Inspector!", this);
+        }
+
         foreach (var binding in deviceButtons)
         {
-            if (binding.button == null || string.IsNullOrEmpty(binding.deviceId)) continue;
+            if (binding.sosWarningElement != null)
+            {
+                binding.sosWarningElement.SetActive(false);
+            }
+
+            if (binding.button == null)
+            {
+                Debug.LogWarning("[DeviceDetailPanel] A button binding in the inspector is missing its Button reference!", this);
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(binding.deviceId))
+            {
+                Debug.LogWarning($"[DeviceDetailPanel] Button '{binding.button.name}' is missing its Device ID!", this);
+                continue;
+            }
 
             string idCopy = binding.deviceId; // capture for closure
             Button buttonCopy = binding.button;
@@ -67,11 +89,42 @@ public class DeviceDetailPanel : MonoBehaviour
 
     private void Update()
     {
+        UpdateBlinking();
+
         _timer += Time.deltaTime;
         if (_timer < refreshInterval) return;
         _timer = 0f;
 
         RefreshDisplay();
+    }
+
+    private void UpdateBlinking()
+    {
+        if (serialLogPanel == null) return;
+
+        // Blink state: cycles active/inactive (3 blinks per second)
+        bool blinkState = (Mathf.FloorToInt(Time.time * 3f) % 2) == 0;
+
+        foreach (var binding in deviceButtons)
+        {
+            if (binding.sosWarningElement == null) continue;
+
+            if (string.IsNullOrEmpty(binding.deviceId))
+            {
+                binding.sosWarningElement.SetActive(false);
+                continue;
+            }
+
+            DeviceData d = serialLogPanel.GetDevice(binding.deviceId);
+            if (d != null && d.Sos)
+            {
+                binding.sosWarningElement.SetActive(blinkState);
+            }
+            else
+            {
+                binding.sosWarningElement.SetActive(false);
+            }
+        }
     }
 
     /// <summary>
