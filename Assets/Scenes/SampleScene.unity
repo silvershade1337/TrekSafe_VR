@@ -773,7 +773,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 497f99dfabbb3c34b9a3840f9d6f3e6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SerialLogPanel
-  portName: COM7
+  portName: COM3
   baudRate: 115200
   readTimeoutMs: 100
   logText: {fileID: 1574230452}
@@ -793,7 +793,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ba19eb96dea5cd45bf82457cbd78d71, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SerialLogPanel
-  portName: COM7
+  portName: COM3
   baudRate: 115200
   readTimeoutMs: 100
   logText: {fileID: 1574230452}

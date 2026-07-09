@@ -89,24 +89,21 @@ public class SerialLogPanel : MonoBehaviour
     private readonly Dictionary<string, DeviceRecord> _devices = new Dictionary<string, DeviceRecord>();
     public IReadOnlyDictionary<string, DeviceRecord> Devices => _devices;
 
-    // Matches: ID=T1,LAT=0.000000,LON=0.000000,TEMP=28.4,PRESS=90972,ALT=899.7,SOS=1,FALL=0
-    private static readonly Regex DataLineRegex = new Regex(
-        @"ID=(?<id>\w+)" +
-        @",LAT=(?<lat>-?\d+(\.\d+)?)" +
-        @",LON=(?<lon>-?\d+(\.\d+)?)" +
-        @",TEMP=(?<temp>-?\d+(\.\d+)?)" +
-        @",PRESS=(?<press>-?\d+(\.\d+)?)" +
-        @",ALT=(?<alt>-?\d+(\.\d+)?)" +
-        @",SOS=(?<sos>\d)" +
-        @",FALL=(?<fall>\d)",
-        RegexOptions.Compiled);
+    // Parses telemetry lines. Supports both the original format and the updated format:
+    // - Old: ID=T1,LAT=0.000000,LON=0.000000,TEMP=28.4,PRESS=90972,ALT=899.7,SOS=1,FALL=0
+    // - New: ID=T02,LAT=0.000000,LON=0.000000,ALT=822.7,TEMP=25.2,SOS=0,FALL=0,BAT=0
 
     // ── internals ──────────────────────────────────────────────────────────
     private SerialPort _port;
     private Thread _readThread;
     private CancellationTokenSource _cts;
 
-    private readonly ConcurrentQueue<string> _lineQueue = new ConcurrentQueue<string>();
+    private struct QueueEntry
+    {
+        public string text;
+        public bool isRawLine;
+    }
+    private readonly ConcurrentQueue<QueueEntry> _lineQueue = new ConcurrentQueue<QueueEntry>();
     private readonly Queue<string> _lineBuffer = new Queue<string>();
 
     // One open StreamWriter per device ID, so each device gets its own CSV file.
@@ -141,13 +138,17 @@ public class SerialLogPanel : MonoBehaviour
     {
         bool gotNew = false;
 
-        while (_lineQueue.TryDequeue(out string line))
+        while (_lineQueue.TryDequeue(out QueueEntry entry))
         {
-            _lineBuffer.Enqueue(line);
+            _lineBuffer.Enqueue(entry.text);
             if (_lineBuffer.Count > maxLines)
                 _lineBuffer.Dequeue();
 
-            TryParseDeviceLine(line);
+            bool parsed = TryParseDeviceLine(entry.text);
+            if (entry.isRawLine)
+            {
+                Debug.Log($"[Serial] Received line: \"{entry.text}\" | Parsed as telemetry: {parsed}");
+            }
 
             gotNew = true;
         }
@@ -171,23 +172,88 @@ public class SerialLogPanel : MonoBehaviour
     }
 
     // ── Parsing ─────────────────────────────────────────────────────────────
-    private void TryParseDeviceLine(string line)
+    private bool TryParseDeviceLine(string line)
     {
-        Match m = DataLineRegex.Match(line);
-        if (!m.Success) return; // not a data line (could be a status/log line) — ignore
+        if (string.IsNullOrEmpty(line) || !line.Contains("ID=") || !line.Contains(",")) return false;
 
-        string id = m.Groups["id"].Value;
+        // Clean up any prefix before ID=
+        int idIdx = line.IndexOf("ID=");
+        if (idIdx > 0)
+        {
+            line = line.Substring(idIdx);
+        }
+
+        // Trim common wrapping or trailing characters
+        line = line.Trim('\'', '"', ' ', '\t', '\r', '\n');
+
+        string id = null;
+        float lat = 0f;
+        float lon = 0f;
+        float temp = 0f;
+        float press = 0f;
+        float alt = 0f;
+        bool sos = false;
+        bool fall = false;
+        bool hasId = false;
+
+        string[] parts = line.Split(',');
+        foreach (string part in parts)
+        {
+            int eqIdx = part.IndexOf('=');
+            if (eqIdx <= 0) continue;
+
+            string key = part.Substring(0, eqIdx).Trim().ToUpperInvariant();
+            string val = part.Substring(eqIdx + 1).Trim('\'', '"', ' ', '\t');
+
+            switch (key)
+            {
+                case "ID":
+                    id = val;
+                    if (id == "T01") id = "T1";
+                    else if (id == "T02") id = "T2";
+                    else if (id == "T03") id = "T3";
+                    else if (id != null && id.StartsWith("T0") && id.Length > 2 && int.TryParse(id.Substring(2), out _))
+                    {
+                        id = "T" + id.Substring(2);
+                    }
+                    hasId = !string.IsNullOrEmpty(id);
+                    break;
+                case "LAT":
+                    lat = ParseFloat(val);
+                    break;
+                case "LON":
+                    lon = ParseFloat(val);
+                    break;
+                case "TEMP":
+                    temp = ParseFloat(val);
+                    break;
+                case "PRESS":
+                    press = ParseFloat(val);
+                    break;
+                case "ALT":
+                    alt = ParseFloat(val);
+                    break;
+                case "SOS":
+                    sos = (val == "1" || val.Equals("true", StringComparison.OrdinalIgnoreCase));
+                    break;
+                case "FALL":
+                    fall = (val == "1" || val.Equals("true", StringComparison.OrdinalIgnoreCase));
+                    break;
+            }
+        }
+
+        if (!hasId) return false;
 
         var data = new DeviceData
         {
             Id = id,
-            Lat = ParseFloat(m.Groups["lat"].Value),
-            Lon = ParseFloat(m.Groups["lon"].Value),
-            Temp = ParseFloat(m.Groups["temp"].Value),
-            Press = ParseFloat(m.Groups["press"].Value),
-            Alt = ParseFloat(m.Groups["alt"].Value),
-            Sos = m.Groups["sos"].Value == "1",
-            Fall = m.Groups["fall"].Value == "1",
+            Lat = lat,
+            Lon = lon,
+            Temp = temp,
+            Press = press,
+            Alt = alt,
+            Sos = sos,
+            Fall = fall,
             Timestamp = DateTime.Now
         };
 
@@ -202,6 +268,8 @@ public class SerialLogPanel : MonoBehaviour
 
         if (enableCsvLogging)
             WriteCsvRow(id, data);
+
+        return true;
     }
 
     private static float ParseFloat(string s)
@@ -343,7 +411,7 @@ public class SerialLogPanel : MonoBehaviour
             {
                 string line = _port.ReadLine();
                 if (!string.IsNullOrEmpty(line))
-                    Enqueue(line.TrimEnd('\r', '\n'));
+                    Enqueue(line.TrimEnd('\r', '\n'), isRawLine: true);
             }
             catch (TimeoutException)
             {
@@ -357,5 +425,5 @@ public class SerialLogPanel : MonoBehaviour
         }
     }
 
-    private void Enqueue(string msg) => _lineQueue.Enqueue(msg);
+    private void Enqueue(string msg, bool isRawLine = false) => _lineQueue.Enqueue(new QueueEntry { text = msg, isRawLine = isRawLine });
 }
